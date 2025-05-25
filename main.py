@@ -1,8 +1,18 @@
 from fastapi import FastAPI, HTTPException, Header
 from pydantic import BaseModel
-from crawl4ai import AsyncWebCrawler
 import os
 from typing import Optional
+
+# Try different import methods for crawl4ai
+try:
+    from crawl4ai import AsyncWebCrawler
+except ImportError:
+    try:
+        from crawl4ai.web_crawler import AsyncWebCrawler
+    except ImportError:
+        # Fallback to sync version
+        from crawl4ai import WebCrawler
+        AsyncWebCrawler = None
 
 app = FastAPI()
 
@@ -18,7 +28,11 @@ class CrawlRequest(BaseModel):
 
 @app.get("/")
 def health_check():
-    return {"status": "healthy", "service": "crawl4ai-api"}
+    return {
+        "status": "healthy", 
+        "service": "crawl4ai-api",
+        "async_available": AsyncWebCrawler is not None
+    }
 
 @app.post("/crawl")
 async def crawl_endpoint(
@@ -30,24 +44,37 @@ async def crawl_endpoint(
         raise HTTPException(status_code=401, detail="Invalid API key")
     
     try:
-        async with AsyncWebCrawler(verbose=False) as crawler:
-            result = await crawler.arun(
+        # Use sync version if async not available
+        if AsyncWebCrawler is None:
+            crawler = WebCrawler(verbose=False)
+            result = crawler.run(
                 url=request.url,
                 wait_for=request.wait_for,
                 css_selector=request.css_selector,
                 screenshot=request.screenshot,
                 js_code=request.js_code
             )
-            
-            return {
-                "success": True,
-                "url": request.url,
-                "markdown": result.markdown,
-                "cleaned_html": result.cleaned_html,
-                "media": {
-                    "images": result.media.get("images", []),
-                    "videos": result.media.get("videos", [])
-                },
-                "links": {
-                    "internal": result.links.get("internal", []),
-                    "external": result.links.get("external", []
+        else:
+            async with AsyncWebCrawler(verbose=False) as crawler:
+                result = await crawler.arun(
+                    url=request.url,
+                    wait_for=request.wait_for,
+                    css_selector=request.css_selector,
+                    screenshot=request.screenshot,
+                    js_code=request.js_code
+                )
+        
+        # Handle different result structures
+        return {
+            "success": True,
+            "url": request.url,
+            "markdown": getattr(result, 'markdown', result.get('markdown', '')),
+            "cleaned_html": getattr(result, 'cleaned_html', result.get('cleaned_html', '')),
+            "media": getattr(result, 'media', {}),
+            "links": getattr(result, 'links', {}),
+            "metadata": getattr(result, 'metadata', {})
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Crawl failed: {str(e)}")
+
+# Add a simple test endpoi
