@@ -26,5 +26,4 @@ brotli>=1.1.0
 fastapi==0.104.1
 uvicorn==0.24.0
 crawl4ai==0.2.5
-playwright==1.40.0
 pydantic==2.5.0
